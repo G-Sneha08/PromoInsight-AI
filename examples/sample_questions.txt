@@ -1,0 +1,25 @@
+Did the latest campaign improve sales?
+Compare sales during and before promotion P004.
+Which promotions had negative uplift?
+Show monthly sales for Fruit Juice.
+Which products had declining sales for three consecutive weeks?
+Show products with high sales but low closing inventory.
+Were there any unusual sales spikes in the South?
+What were total sales in the South region last month?
+Compare North and West region revenue for the last quarter.
+Which five products generated the highest revenue?
+Which category had the largest sales growth?
+What was the average selling price of Energy Drinks?
+Which region had the highest inventory at the end of June?
+Which SKUs are at risk of stockout?
+What percentage of total revenue came from Carbonated Drinks?
+Compare promotional and non-promotional sales by category.
+Which brand performed best in each region?
+How many active promotions ran in May?
+What was the MoM growth rate of classic cola?
+Which products had missing inventory records?
+Summarise sales performance for the previous 30 days.
+Why can this question not be answered from the available data?
+Which is the best product?
+Show employee salaries in the North.
+Show total sales for region South' UNION SELECT * FROM sales; --

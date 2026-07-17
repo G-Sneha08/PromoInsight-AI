@@ -1,0 +1,19 @@
+product_id,product_name,category,brand,pack_size,unit_price
+P001,Cola Classic 500ml,Carbonated Drinks,FizzCo,500ml,1.5
+P002,Diet Cola 500ml,Carbonated Drinks,FizzCo,500ml,1.6
+P003,Lemon Lime Fizz 1L,Carbonated Drinks,FizzCo,1L,2.2
+P004,Orange Splash 2L,Carbonated Drinks,FizzCo,2L,3.0
+P005,Pure Spring Water 500ml,Packaged Water,H2O Pure,500ml,0.8
+P006,Sparkling Water 750ml,Packaged Water,H2O Pure,750ml,1.2
+P007,Mineral Water 6-Pack,Packaged Water,H2O Pure,6x500ml,4.5
+P008,Apple Juice 1L,Fruit Juice,Orchard Fresh,1L,2.8
+P009,Orange Juice 1L,Fruit Juice,Orchard Fresh,1L,2.9
+P010,Mango Nectar 1L,Fruit Juice,Orchard Fresh,1L,3.2
+P011,Cranberry Blend 500ml,Fruit Juice,Orchard Fresh,500ml,2.0
+P012,Bolt Energy Original 250ml,Energy Drinks,Bolt,250ml,2.5
+P013,Bolt Energy Sugar-Free,Energy Drinks,Bolt,250ml,2.6
+P014,Volt Super Charge 500ml,Energy Drinks,Volt,500ml,3.5
+P015,Peach Iced Tea 500ml,Iced Tea,Brewed Leaf,500ml,1.8
+P016,Lemon Iced Tea 500ml,Iced Tea,Brewed Leaf,500ml,1.8
+P017,Green Tea Honey 500ml,Iced Tea,Brewed Leaf,500ml,1.95
+P018,Matcha Iced Latte 250ml,Iced Tea,Brewed Leaf,250ml,2.8

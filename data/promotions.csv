@@ -1,0 +1,11 @@
+promotion_id,promotion_name,promotion_type,discount_percentage,start_date,end_date,product_id,region_id
+PROM01,Summer Soda Festival,Discount,15.0,2025-07-01,2025-07-15,P001,R02
+PROM02,Summer Soda Festival,Discount,15.0,2025-07-01,2025-07-15,P001,R04
+PROM03,Orange Splash Promo,Discount,20.0,2025-08-10,2025-08-25,P004,R03
+PROM04,Back to School Juice,Bundle,10.0,2025-09-01,2025-09-20,P008,R01
+PROM05,Bolt Energy Flash Sale,Discount,30.0,2025-10-05,2025-10-12,P012,R02
+PROM06,Thanksgiving Tea Blast,Discount,25.0,2025-11-20,2025-11-30,P015,R02
+PROM07,Thanksgiving Tea Overlap,Bundle,15.0,2025-11-24,2025-11-30,P015,R02
+PROM08,Winter Hydration Promo,Discount,10.0,2025-12-15,2026-01-05,P005,R01
+PROM09,Spring Juice Refresh,Discount,15.0,2026-03-10,2026-03-25,P009,R04
+PROM10,Volt Energy Kickoff,Discount,20.0,2026-05-01,2026-05-15,P014,R05

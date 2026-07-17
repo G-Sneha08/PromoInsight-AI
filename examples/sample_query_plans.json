@@ -1,0 +1,76 @@
+[
+  {
+    "question": "Which three products had the highest promotion uplift in the South region last month?",
+    "plan": {
+      "operations": [
+        {
+          "operation_type": "rank",
+          "metric": "promotion_uplift_percentage",
+          "dimensions": ["product_name"],
+          "filters": [
+            {
+              "field": "region_name",
+              "operator": "equals",
+              "value": "South"
+            }
+          ],
+          "time_range": {
+            "type": "relative",
+            "value": "last_month",
+            "start_date": null,
+            "end_date": null
+          },
+          "comparison": {
+            "method": "previous_non_promotional_weeks",
+            "number_of_weeks": 4
+          },
+          "group_by": ["product_name"],
+          "order_by": [
+            {
+              "field": "promotion_uplift_percentage",
+              "direction": "descending"
+            }
+          ],
+          "limit": 3,
+          "time_granularity": null
+        }
+      ],
+      "needs_clarification": false,
+      "clarification_question": null,
+      "assumptions": []
+    }
+  },
+  {
+    "question": "What were total sales in the South region last month?",
+    "plan": {
+      "operations": [
+        {
+          "operation_type": "aggregate",
+          "metric": "total_sales",
+          "dimensions": [],
+          "filters": [
+            {
+              "field": "region_name",
+              "operator": "equals",
+              "value": "South"
+            }
+          ],
+          "time_range": {
+            "type": "relative",
+            "value": "last_month",
+            "start_date": null,
+            "end_date": null
+          },
+          "comparison": null,
+          "group_by": [],
+          "order_by": [],
+          "limit": null,
+          "time_granularity": null
+        }
+      ],
+      "needs_clarification": false,
+      "clarification_question": null,
+      "assumptions": []
+    }
+  }
+]

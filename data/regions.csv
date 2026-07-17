@@ -1,0 +1,6 @@
+region_id,region_name,state_group
+R01,North,"NY, PA, OH, IL, MI"
+R02,South,"TX, FL, GA, NC, VA"
+R03,East,"MA, MD, NJ, CT, DE"
+R04,West,"CA, WA, OR, AZ, CO"
+R05,Central,"KS, NE, IA, MO, WI"

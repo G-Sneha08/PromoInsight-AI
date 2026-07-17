@@ -1,0 +1,1 @@
+# PromoInsight AI package init

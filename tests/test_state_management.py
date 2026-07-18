@@ -9,6 +9,10 @@ from src.state_management import (
     deduplicate_result_entities,
     classify_reference,
     is_meaningful_follow_up,
+    segment_questions,
+    classify_segment,
+    prepare_ordinal_follow_up,
+    classify_input,
 )
 
 
@@ -88,3 +92,55 @@ def test_meaningful_follow_up_requires_real_transformation():
     assert is_meaningful_follow_up("show sales", {}) is False
     assert is_meaningful_follow_up("show sales for South", {}) is True
     assert is_meaningful_follow_up("show sales last month", {}) is True
+
+
+def test_segment_questions_split_independent_requests():
+    text = "Which products had the highest sales? Show the top three regions."
+    segments = segment_questions(text)
+    assert len(segments) == 2
+    assert segments[0]["text"].startswith("Which products")
+    assert segments[1]["text"].startswith("Show the top three regions")
+
+
+def test_classify_segment_uses_context_for_follow_up():
+    context = {"last_successful_plan": {"operation_type": "rank", "metric": "total_sales"}}
+    assert classify_segment("Show the second one.", context) == "follow_up"
+    assert classify_segment("Show total sales for Fruit Juice.", {}) == "independent_question"
+
+
+def test_prepare_ordinal_follow_up_removes_limit_one():
+    plan = {"operation_type": "rank", "metric": "total_sales", "limit": 1}
+    prepared = prepare_ordinal_follow_up("Which one was second?", plan)
+    assert prepared["limit"] == 2
+
+
+def test_classify_input_rejects_low_information_queries():
+    assert classify_input("") == "malformed_input"
+    assert classify_input("   ") == "malformed_input"
+    assert classify_input("the") == "incomplete_query"
+    assert classify_input("sales") == "incomplete_query"
+    assert classify_input("show") == "incomplete_query"
+    assert classify_input("what") == "incomplete_query"
+    assert classify_input("tell me") == "incomplete_query"
+    assert classify_input("hello") == "casual_input"
+    assert classify_input("!!!") == "malformed_input"
+    assert classify_input("something") == "incomplete_query"
+    assert classify_input("test") == "incomplete_query"
+
+
+def test_classify_input_accepts_valid_follow_up_with_context():
+    context = {"last_successful_plan": {"operation_type": "aggregate", "metric": "total_sales"}}
+    assert classify_input("South only", context) == "valid_query"
+    assert classify_input("Monthly", context) == "valid_query"
+
+
+def test_classify_input_accepts_valid_analytical_queries():
+    assert classify_input("Show sales in South") == "valid_query"
+    assert classify_input("Show closing inventory") == "valid_query"
+    assert classify_input("How complete is the inventory dataset?") == "valid_query"
+
+
+def test_classify_input_does_not_use_total_sales_as_universal_fallback():
+    assert classify_input("the") != "valid_query"
+    assert classify_input("show") != "valid_query"
+    assert classify_input("sales") != "valid_query"

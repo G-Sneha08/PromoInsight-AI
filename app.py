@@ -221,6 +221,7 @@ from src.state_management import (
     deduplicate_history_entries,
     classify_reference,
     is_meaningful_follow_up,
+    classify_input,
 )
 
 # Initialise session state variables
@@ -365,93 +366,115 @@ if (submit_button or st.session_state.current_question) and user_query:
         try:
             st.markdown("#### ⚙️ Pipeline Execution Trace")
 
-            parsed_plan = None
-            plan_source = "Rule-Based Engine"
+            input_classification = classify_input(user_query, st.session_state.conversation_context)
+            if input_classification != "valid_query":
+                if input_classification == "casual_input":
+                    message = "I can help analyse sales, promotions, products, regions, and inventory. Please ask a business question."
+                elif input_classification == "ambiguous_query":
+                    message = "Please clarify which business metric or entity you want to analyse."
+                elif input_classification == "unsupported_query":
+                    message = "This question cannot be answered reliably from the currently available sales, promotion, product, region and inventory data."
+                else:
+                    message = "Please enter a complete business question about sales, promotions, products, regions, or inventory."
 
-            if parser_mode == "LLM Query Planner" and planner.is_configured():
-                parsed_plan = planner.plan(user_query, st.session_state.history)
-                plan_source = "LLM Query Planner"
-
-            if parsed_plan is None:
-                rb_parser = RuleBasedParser()
-                parsed_plan = rb_parser.parse(user_query, st.session_state.history)
-                plan_source = "Rule-Based Parser (Fallback)"
-
-            st.info(f"✔ **Intent Parsing**: Query plan structured using **{plan_source}**.")
-
-            is_valid, validation_msg = QueryValidator.validate(parsed_plan)
-            if not is_valid:
-                st.session_state.current_status = "validation_error"
-                st.session_state.current_response = {"direct_answer": validation_msg}
+                st.session_state.current_status = input_classification
+                st.session_state.current_response = {"direct_answer": message}
                 st.session_state.current_metrics = {}
                 st.session_state.current_data = []
                 st.session_state.current_chart = None
                 st.session_state.current_sql = ""
+                st.session_state.current_plan = None
             else:
-                st.success("✔ **Schema & Metric Validation**: Query plan successfully validated.")
+                parsed_plan = None
+                plan_source = "Rule-Based Engine"
 
-                if parsed_plan.needs_clarification:
-                    st.session_state.current_status = "clarification"
-                    st.session_state.current_response = {"direct_answer": parsed_plan.clarification_question}
+                if parser_mode == "LLM Query Planner" and planner.is_configured():
+                    parsed_plan = planner.plan(user_query, st.session_state.history)
+                    plan_source = "LLM Query Planner"
+
+                if parsed_plan is None:
+                    rb_parser = RuleBasedParser()
+                    parsed_plan = rb_parser.parse(user_query, st.session_state.history)
+                    plan_source = "Rule-Based Parser (Fallback)"
+
+                st.info(f"✔ **Intent Parsing**: Query plan structured using **{plan_source}**.")
+
+                is_valid, validation_msg = QueryValidator.validate(parsed_plan)
+                if not is_valid:
+                    st.session_state.current_status = "validation_error"
+                    st.session_state.current_response = {"direct_answer": validation_msg}
                     st.session_state.current_metrics = {}
                     st.session_state.current_data = []
                     st.session_state.current_chart = None
                     st.session_state.current_sql = ""
+                    st.session_state.current_plan = None
                 else:
-                    analytics_res = AnalyticsEngine.execute_plan(parsed_plan, user_query)
-                    is_res_ok, verify_msg, validated_res = ResultValidator.validate_results(analytics_res)
+                    st.success("✔ **Schema & Metric Validation**: Query plan successfully validated.")
 
-                    if not is_res_ok:
-                        st.session_state.current_status = "execution_error"
-                        st.session_state.current_response = {"direct_answer": verify_msg}
+                    if parsed_plan.needs_clarification:
+                        st.session_state.current_status = "clarification"
+                        st.session_state.current_response = {"direct_answer": parsed_plan.clarification_question}
                         st.session_state.current_metrics = {}
                         st.session_state.current_data = []
                         st.session_state.current_chart = None
                         st.session_state.current_sql = ""
+                        st.session_state.current_plan = None
                     else:
-                        st.success("✔ **Result Verification**: Output passed safety checks (NaN, Inf, Causal Claims).")
+                        analytics_res = AnalyticsEngine.execute_plan(parsed_plan, user_query)
+                        is_res_ok, verify_msg, validated_res = ResultValidator.validate_results(analytics_res)
 
-                        df_res = validated_res.get("data", pd.DataFrame())
-                        if not df_res.empty and parsed_plan.operations:
-                            op = parsed_plan.operations[0]
-                            if op.group_by:
-                                dim_col = df_res.columns[0]
-                                top_val = df_res.iloc[0][dim_col]
-                                parsed_plan.resolved_entity = {"field": dim_col, "value": top_val}
+                        if not is_res_ok:
+                            st.session_state.current_status = "execution_error"
+                            st.session_state.current_response = {"direct_answer": verify_msg}
+                            st.session_state.current_metrics = {}
+                            st.session_state.current_data = []
+                            st.session_state.current_chart = None
+                            st.session_state.current_sql = ""
+                            st.session_state.current_plan = None
+                        else:
+                            st.success("✔ **Result Verification**: Output passed safety checks (NaN, Inf, Causal Claims).")
 
-                        response = ResponseGenerator.generate_response(validated_res, user_query)
+                            df_res = validated_res.get("data", pd.DataFrame())
+                            if not df_res.empty and parsed_plan.operations:
+                                op = parsed_plan.operations[0]
+                                if op.group_by:
+                                    dim_col = df_res.columns[0]
+                                    top_val = df_res.iloc[0][dim_col]
+                                    parsed_plan.resolved_entity = {"field": dim_col, "value": top_val}
 
-                        st.session_state.current_plan = parsed_plan
-                        st.session_state.current_response = response
-                        st.session_state.current_data = validated_res.get("data", pd.DataFrame())
-                        st.session_state.current_metrics = response.get("key_metrics", {})
-                        st.session_state.current_chart = ChartGenerator.generate_chart(
-                            st.session_state.current_data,
-                            parsed_plan.operations[0].operation_type if parsed_plan.operations else "aggregate",
-                            parsed_plan.operations[0].metric if parsed_plan.operations else "total_sales"
-                        )
-                        st.session_state.current_sql = validated_res.get("sql", "")
-                        st.session_state.current_status = "success"
+                            response = ResponseGenerator.generate_response(validated_res, user_query)
 
-                        st.session_state.history.append(parsed_plan)
-                        st.session_state.query_history = deduplicate_history_entries(
-                            st.session_state.query_history + [{
-                                "request_id": f"req-{len(st.session_state.query_history) + 1}",
-                                "question": user_query,
-                                "status": "success",
-                                "plan": parsed_plan.model_dump() if parsed_plan else None,
-                                "response": response,
-                                "error": None,
-                            }]
-                        )
-                        st.session_state.conversation_context = {
-                            "last_question": user_query,
-                            "last_plan": parsed_plan.model_dump() if parsed_plan else None,
-                            "resolved_entity": parsed_plan.resolved_entity,
-                            "last_response": response,
-                        }
-                        st.session_state.last_successful_plan = parsed_plan.model_dump() if parsed_plan else None
-                        st.session_state.last_resolved_entity = parsed_plan.resolved_entity
+                            st.session_state.current_plan = parsed_plan
+                            st.session_state.current_response = response
+                            st.session_state.current_data = validated_res.get("data", pd.DataFrame())
+                            st.session_state.current_metrics = response.get("key_metrics", {})
+                            st.session_state.current_chart = ChartGenerator.generate_chart(
+                                st.session_state.current_data,
+                                parsed_plan.operations[0].operation_type if parsed_plan.operations else "aggregate",
+                                parsed_plan.operations[0].metric if parsed_plan.operations else "total_sales"
+                            )
+                            st.session_state.current_sql = validated_res.get("sql", "")
+                            st.session_state.current_status = "success"
+
+                            st.session_state.history.append(parsed_plan)
+                            st.session_state.query_history = deduplicate_history_entries(
+                                st.session_state.query_history + [{
+                                    "request_id": f"req-{len(st.session_state.query_history) + 1}",
+                                    "question": user_query,
+                                    "status": "success",
+                                    "plan": parsed_plan.model_dump() if parsed_plan else None,
+                                    "response": response,
+                                    "error": None,
+                                }]
+                            )
+                            st.session_state.conversation_context = {
+                                "last_question": user_query,
+                                "last_plan": parsed_plan.model_dump() if parsed_plan else None,
+                                "resolved_entity": parsed_plan.resolved_entity,
+                                "last_response": response,
+                            }
+                            st.session_state.last_successful_plan = parsed_plan.model_dump() if parsed_plan else None
+                            st.session_state.last_resolved_entity = parsed_plan.resolved_entity
         except Exception as exc:
             st.session_state.current_status = "error"
             st.session_state.current_response = {"direct_answer": f"An unexpected error occurred: {exc}"}
@@ -459,6 +482,7 @@ if (submit_button or st.session_state.current_question) and user_query:
             st.session_state.current_data = []
             st.session_state.current_chart = None
             st.session_state.current_sql = ""
+            st.session_state.current_plan = None
 
 # Render current result only when current status is success
 if st.session_state.current_status == "success" and st.session_state.current_response:
@@ -540,7 +564,7 @@ if st.session_state.current_status == "success" and st.session_state.current_res
             with st.expander(f"Question: {old_q}"):
                 st.write(old_resp["direct_answer"])
 else:
-    if st.session_state.current_status in {"clarification", "validation_error", "execution_error", "empty_result", "error"} and st.session_state.current_response:
+    if st.session_state.current_status in {"clarification", "validation_error", "execution_error", "empty_result", "error", "incomplete_query", "ambiguous_query", "unsupported_query", "casual_input", "malformed_input"} and st.session_state.current_response:
         st.markdown("### 💬 Analysis Results")
         st.markdown(f"<div class='custom-card'><div class='card-title'>⚠️ STATUS</div><p>{markdown_to_html_bold(st.session_state.current_response['direct_answer'])}</p></div>", unsafe_allow_html=True)
     elif st.session_state.current_status == "processing":

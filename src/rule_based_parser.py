@@ -2,6 +2,7 @@ import re
 from typing import List, Optional, Tuple, Dict, Any
 from src.models import QueryPlan, OperationPlan, FilterCondition, TimeRange, ComparisonConfig, SortCondition
 from src.schema_context import SchemaContext
+from src.state_management import classify_input
 
 # Reusable synonym maps for dimensions and metrics
 DIMENSION_MAP: Dict[str, List[str]] = {
@@ -104,6 +105,32 @@ class RuleBasedParser:
     def parse(self, question: str, history: Optional[List[QueryPlan]] = None) -> QueryPlan:
         q = question.lower().strip()
 
+        history_context = {}
+        if history:
+            last_plan = history[-1]
+            history_context = {
+                "last_successful_plan": last_plan.model_dump() if hasattr(last_plan, "model_dump") else last_plan,
+                "resolved_entity": getattr(last_plan, "resolved_entity", None),
+                "last_question": getattr(last_plan, "assumptions", None),
+            }
+
+        if re.search(r"^which one (was|performed)( the)? best\??$", q):
+            return QueryPlan(
+                needs_clarification=True,
+                clarification_question="Should I compare regions, categories, brands, products, or promotions?",
+                assumptions=["User asked for a vague best-performing item without specifying the entity or metric."]
+            )
+
+        classification = classify_input(question, history_context)
+        if classification != "valid_query":
+            if classification == "ambiguous_query":
+                return QueryPlan(
+                    needs_clarification=True,
+                    clarification_question="Please clarify which business metric or entity you want to analyse.",
+                    assumptions=["Input was classified as ambiguous."
+                ])
+            return QueryPlan(operations=[])
+
         # Out-of-scope / unsupported questions
         out_of_scope_terms = [
             "salary", "salaries", "employee", "employees", "staff",
@@ -124,6 +151,13 @@ class RuleBasedParser:
                 )
 
         # Unresolved pronouns without valid context
+        if q in {"which one was the best", "which one performed best", "which one was best", "which one performed best?"}:
+            return QueryPlan(
+                needs_clarification=True,
+                clarification_question="Should I compare regions, categories, brands, products, or promotions?",
+                assumptions=["User asked for a vague best-performing item without specifying the entity or metric."]
+            )
+
         pronoun_clarification = self._check_unclear_pronoun(q, history)
         if pronoun_clarification:
             return pronoun_clarification

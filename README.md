@@ -326,7 +326,7 @@ PromoInsight AI includes the following controls:
 
 ## 📋 Assessment Details
 
-**Assessment:** OneTapp Consulting – Assessment Round 1  
+**Assessment:** OneTapp Consulting – Assessment  
 **Specialisation:** AI/ML Engineer  
 **Candidate:** G Sneha  
 **College:** REVA University  

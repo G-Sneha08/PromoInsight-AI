@@ -211,14 +211,49 @@ from src.analytics_engine import AnalyticsEngine
 from src.result_validator import ResultValidator
 from src.response_generator import ResponseGenerator
 from src.chart_generator import ChartGenerator
+from src.state_management import (
+    reset_current_display_state,
+    deductuplicate_filters,
+    deduplicate_dimensions,
+    deduplicate_group_by,
+    deduplicate_sort_conditions,
+    deduplicate_result_entities,
+    deduplicate_history_entries,
+    classify_reference,
+    is_meaningful_follow_up,
+)
 
 # Initialise session state variables
 if "history" not in st.session_state:
     st.session_state.history = []  # Stores QueryPlan objects
 if "chat_history" not in st.session_state:
-    st.session_state.chat_history = []  # Stores (question, response_dict, sql, plan_json) tuples
+    st.session_state.chat_history = []  # Stores immutable request records
 if "current_question" not in st.session_state:
     st.session_state.current_question = ""
+if "current_request" not in st.session_state:
+    st.session_state.current_request = ""
+if "current_status" not in st.session_state:
+    st.session_state.current_status = "idle"
+if "current_plan" not in st.session_state:
+    st.session_state.current_plan = None
+if "current_response" not in st.session_state:
+    st.session_state.current_response = None
+if "current_data" not in st.session_state:
+    st.session_state.current_data = []
+if "current_chart" not in st.session_state:
+    st.session_state.current_chart = None
+if "current_metrics" not in st.session_state:
+    st.session_state.current_metrics = {}
+if "current_sql" not in st.session_state:
+    st.session_state.current_sql = ""
+if "conversation_context" not in st.session_state:
+    st.session_state.conversation_context = {}
+if "query_history" not in st.session_state:
+    st.session_state.query_history = []
+if "last_successful_plan" not in st.session_state:
+    st.session_state.last_successful_plan = None
+if "last_resolved_entity" not in st.session_state:
+    st.session_state.last_resolved_entity = None
     
 # Main Hero Header
 st.markdown("""
@@ -277,7 +312,12 @@ st.sidebar.write("**Categories**: " + ", ".join(db_summary.get("categories", ["C
 if st.sidebar.button("Clear Conversation History", use_container_width=True):
     st.session_state.history = []
     st.session_state.chat_history = []
+    st.session_state.query_history = []
+    st.session_state.conversation_context = {}
+    st.session_state.last_successful_plan = None
+    st.session_state.last_resolved_entity = None
     st.session_state.current_question = ""
+    reset_current_display_state(st.session_state)
     st.rerun()
 
 # 2. Main Page Layout
@@ -316,99 +356,126 @@ with st.form(key="chat_form"):
 
 # Process query when submitted
 if (submit_button or st.session_state.current_question) and user_query:
-    st.session_state.current_question = "" # Reset suggestion state
-    
-    with st.spinner("Processing question through architectural layers..."):
-        # Layer 1: Parse intent and entities
-        st.markdown("#### ⚙️ Pipeline Execution Trace")
-        
-        parsed_plan = None
-        plan_source = "Rule-Based Engine"
-        
-        if parser_mode == "LLM Query Planner" and planner.is_configured():
-            parsed_plan = planner.plan(user_query, st.session_state.history)
-            plan_source = "LLM Query Planner"
-            
-        if parsed_plan is None:
-            # Fallback
-            rb_parser = RuleBasedParser()
-            parsed_plan = rb_parser.parse(user_query, st.session_state.history)
-            plan_source = "Rule-Based Parser (Fallback)"
-            
-        # Display execution indicator
-        st.info(f"✔ **Intent Parsing**: Query plan structured using **{plan_source}**.")
-        
-        # Layer 2: Schema-Aware Validation
-        is_valid, validation_msg = QueryValidator.validate(parsed_plan)
-        
-        if not is_valid:
-            st.error(f"❌ **Validation Failed**: {validation_msg}")
-        else:
-            st.success("✔ **Schema & Metric Validation**: Query plan successfully validated.")
-            
-            # If the planner requested clarification, show and wait
-            if parsed_plan.needs_clarification:
-                st.markdown(f"""
-                <div class="warning-box">
-                    <strong>Clarification Required:</strong><br/>
-                    {parsed_plan.clarification_question}
-                </div>
-                """, unsafe_allow_html=True)
-            else:
-                # Layer 3: Execute Analytics & SQL Compile
-                analytics_res = AnalyticsEngine.execute_plan(parsed_plan, user_query)
-                
-                # Layer 4: Result Verification
-                is_res_ok, verify_msg, validated_res = ResultValidator.validate_results(analytics_res)
-                
-                if not is_res_ok:
-                    st.error(f"❌ **Result Verification Failed**: {verify_msg}")
-                else:
-                    st.success("✔ **Result Verification**: Output passed safety checks (NaN, Inf, Causal Claims).")
-                    
-                    # Extract top resolved entity from results for context carryover
-                    df_res = validated_res.get("data", pd.DataFrame())
-                    if not df_res.empty and parsed_plan.operations:
-                        op = parsed_plan.operations[0]
-                        if op.group_by:
-                            dim_col = df_res.columns[0]
-                            top_val = df_res.iloc[0][dim_col]
-                            parsed_plan.resolved_entity = {"field": dim_col, "value": top_val}
-                            
-                    # Add to history now that it has executed successfully
-                    st.session_state.history.append(parsed_plan)
-                    
-                    # Layer 5: Response Generation
-                    response = ResponseGenerator.generate_response(validated_res, user_query)
-                    
-                    # Save to chat history
-                    st.session_state.chat_history.insert(0, (
-                        user_query,
-                        response,
-                        validated_res.get("sql", ""),
-                        parsed_plan.model_dump_json(indent=2),
-                        validated_res.get("data", pd.DataFrame()),
-                        parsed_plan
-                    ))
+    st.session_state.current_question = ""
+    reset_current_display_state(st.session_state)
+    st.session_state.current_request = user_query
+    st.session_state.current_status = "processing"
 
-# Display Chat History (Current Answer at the Top)
-if st.session_state.chat_history:
+    with st.spinner("Processing question through architectural layers..."):
+        try:
+            st.markdown("#### ⚙️ Pipeline Execution Trace")
+
+            parsed_plan = None
+            plan_source = "Rule-Based Engine"
+
+            if parser_mode == "LLM Query Planner" and planner.is_configured():
+                parsed_plan = planner.plan(user_query, st.session_state.history)
+                plan_source = "LLM Query Planner"
+
+            if parsed_plan is None:
+                rb_parser = RuleBasedParser()
+                parsed_plan = rb_parser.parse(user_query, st.session_state.history)
+                plan_source = "Rule-Based Parser (Fallback)"
+
+            st.info(f"✔ **Intent Parsing**: Query plan structured using **{plan_source}**.")
+
+            is_valid, validation_msg = QueryValidator.validate(parsed_plan)
+            if not is_valid:
+                st.session_state.current_status = "validation_error"
+                st.session_state.current_response = {"direct_answer": validation_msg}
+                st.session_state.current_metrics = {}
+                st.session_state.current_data = []
+                st.session_state.current_chart = None
+                st.session_state.current_sql = ""
+            else:
+                st.success("✔ **Schema & Metric Validation**: Query plan successfully validated.")
+
+                if parsed_plan.needs_clarification:
+                    st.session_state.current_status = "clarification"
+                    st.session_state.current_response = {"direct_answer": parsed_plan.clarification_question}
+                    st.session_state.current_metrics = {}
+                    st.session_state.current_data = []
+                    st.session_state.current_chart = None
+                    st.session_state.current_sql = ""
+                else:
+                    analytics_res = AnalyticsEngine.execute_plan(parsed_plan, user_query)
+                    is_res_ok, verify_msg, validated_res = ResultValidator.validate_results(analytics_res)
+
+                    if not is_res_ok:
+                        st.session_state.current_status = "execution_error"
+                        st.session_state.current_response = {"direct_answer": verify_msg}
+                        st.session_state.current_metrics = {}
+                        st.session_state.current_data = []
+                        st.session_state.current_chart = None
+                        st.session_state.current_sql = ""
+                    else:
+                        st.success("✔ **Result Verification**: Output passed safety checks (NaN, Inf, Causal Claims).")
+
+                        df_res = validated_res.get("data", pd.DataFrame())
+                        if not df_res.empty and parsed_plan.operations:
+                            op = parsed_plan.operations[0]
+                            if op.group_by:
+                                dim_col = df_res.columns[0]
+                                top_val = df_res.iloc[0][dim_col]
+                                parsed_plan.resolved_entity = {"field": dim_col, "value": top_val}
+
+                        response = ResponseGenerator.generate_response(validated_res, user_query)
+
+                        st.session_state.current_plan = parsed_plan
+                        st.session_state.current_response = response
+                        st.session_state.current_data = validated_res.get("data", pd.DataFrame())
+                        st.session_state.current_metrics = response.get("key_metrics", {})
+                        st.session_state.current_chart = ChartGenerator.generate_chart(
+                            st.session_state.current_data,
+                            parsed_plan.operations[0].operation_type if parsed_plan.operations else "aggregate",
+                            parsed_plan.operations[0].metric if parsed_plan.operations else "total_sales"
+                        )
+                        st.session_state.current_sql = validated_res.get("sql", "")
+                        st.session_state.current_status = "success"
+
+                        st.session_state.history.append(parsed_plan)
+                        st.session_state.query_history = deduplicate_history_entries(
+                            st.session_state.query_history + [{
+                                "request_id": f"req-{len(st.session_state.query_history) + 1}",
+                                "question": user_query,
+                                "status": "success",
+                                "plan": parsed_plan.model_dump() if parsed_plan else None,
+                                "response": response,
+                                "error": None,
+                            }]
+                        )
+                        st.session_state.conversation_context = {
+                            "last_question": user_query,
+                            "last_plan": parsed_plan.model_dump() if parsed_plan else None,
+                            "resolved_entity": parsed_plan.resolved_entity,
+                            "last_response": response,
+                        }
+                        st.session_state.last_successful_plan = parsed_plan.model_dump() if parsed_plan else None
+                        st.session_state.last_resolved_entity = parsed_plan.resolved_entity
+        except Exception as exc:
+            st.session_state.current_status = "error"
+            st.session_state.current_response = {"direct_answer": f"An unexpected error occurred: {exc}"}
+            st.session_state.current_metrics = {}
+            st.session_state.current_data = []
+            st.session_state.current_chart = None
+            st.session_state.current_sql = ""
+
+# Render current result only when current status is success
+if st.session_state.current_status == "success" and st.session_state.current_response:
     st.markdown("### 💬 Analysis Results")
-    
-    # Display the most recent result
-    latest = st.session_state.chat_history[0]
-    q, resp, sql_str, plan_json, df_res, plan_obj = latest
-    
-    # 1. Direct Answer Card
+    resp = st.session_state.current_response
+    df_res = st.session_state.current_data
+    plan_obj = st.session_state.current_plan
+    sql_str = st.session_state.current_sql
+
     st.markdown(f"""
     <div class="custom-card">
         <div class="card-title">💡 DIRECT ANSWER</div>
         <p style="font-size: 1.1rem; line-height: 1.6; color: #F1F5F9;">{markdown_to_html_bold(resp['direct_answer'])}</p>
     </div>
     """, unsafe_allow_html=True)
-    
-    # 2. Key Metrics Cards
-    if resp["key_metrics"]:
+
+    if resp.get("key_metrics"):
         st.markdown("#### Key Metrics")
         st.markdown('<div class="metric-container">', unsafe_allow_html=True)
         m_cols = st.columns(len(resp["key_metrics"]))
@@ -421,69 +488,62 @@ if st.session_state.chat_history:
                 </div>
                 """, unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)
-        
-    # 3. Dynamic Visualisation & Data Table
+
     left_c, right_c = st.columns([1, 1])
-    
     with left_c:
         st.markdown("#### 📊 Dynamic Chart")
-        fig = ChartGenerator.generate_chart(
-            df_res, 
-            plan_obj.operations[0].operation_type if plan_obj.operations else "aggregate",
-            plan_obj.operations[0].metric if plan_obj.operations else "total_sales"
-        )
+        fig = st.session_state.current_chart
         if fig:
             st.plotly_chart(fig, use_container_width=True)
         else:
             st.info("No plot representation available for this data shape.")
-            
+
     with right_c:
         st.markdown("#### 📋 Data Table")
         if not df_res.empty:
             st.dataframe(df_res, use_container_width=True, hide_index=True)
         else:
             st.info("No detailed data table generated.")
-            
-    # 4. Warnings, Assumptions, Recommendations
+
     st.markdown("#### 🔍 Business Context & Guidance")
-    
     c_a, c_b, c_c = st.columns(3)
     with c_a:
         st.markdown("**Assumptions Applied**")
-        for asm in resp["assumptions"]:
+        for asm in resp.get("assumptions", []):
             st.markdown(f"- {asm}")
     with c_b:
         st.markdown("**System Warnings**")
-        if resp["warnings"]:
+        if resp.get("warnings"):
             for wrn in resp["warnings"]:
                 st.markdown(f'<div class="warning-box">{wrn}</div>', unsafe_allow_html=True)
         else:
             st.write("No operational warnings detected.")
     with c_c:
         st.markdown("**Recommended Action**")
-        st.markdown(f'<div class="rec-box">{resp["recommended_action"]}</div>', unsafe_allow_html=True)
-        
-    # 5. Architecture Transparency Expanders
+        st.markdown(f'<div class="rec-box">{resp.get("recommended_action", "")}</div>', unsafe_allow_html=True)
+
     st.markdown("---")
     st.markdown("### 🔬 System Transparency Trace")
-    
     with st.expander("Structured Query Plan (JSON Schema)"):
-        st.json(plan_json)
-        
+        st.json(plan_obj.model_dump_json(indent=2) if plan_obj else {})
     with st.expander("Compiled Parameterized SQL Query"):
         st.code(sql_str, language="sql")
-        
     with st.expander("Data Quality Diagnostics status"):
-        st.write(f"Data verification: **{resp['data_quality']}**")
+        st.write(f"Data verification: **{resp.get('data_quality', 'N/A')}**")
         st.write("Referential status: **All foreign keys resolved.**")
-        
-    # Older chat history collapsible list
+
     if len(st.session_state.chat_history) > 1:
         st.markdown("---")
         st.markdown("### 📜 Previous Queries")
-        for old_idx, old_chat in enumerate(st.session_state.chat_history[1:]):
+        for old_chat in st.session_state.chat_history[1:]:
             old_q, old_resp, _, _, _, _ = old_chat
             with st.expander(f"Question: {old_q}"):
                 st.write(old_resp["direct_answer"])
 else:
-    st.info("Ask a question above or click one of the suggested questions to begin your analysis.")
+    if st.session_state.current_status in {"clarification", "validation_error", "execution_error", "empty_result", "error"} and st.session_state.current_response:
+        st.markdown("### 💬 Analysis Results")
+        st.markdown(f"<div class='custom-card'><div class='card-title'>⚠️ STATUS</div><p>{markdown_to_html_bold(st.session_state.current_response['direct_answer'])}</p></div>", unsafe_allow_html=True)
+    elif st.session_state.current_status == "processing":
+        st.info("Processing your request...")
+    else:
+        st.info("Ask a question above or click one of the suggested questions to begin your analysis.")

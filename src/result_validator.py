@@ -11,7 +11,7 @@ class ResultValidator:
             
         df = analytics_res.get("data", pd.DataFrame())
         
-        # 1. Check if empty
+        # 1. Check if empty or if aggregated values are missing
         if df.empty:
             if "full_results" in analytics_res:
                 pass
@@ -19,7 +19,23 @@ class ResultValidator:
                 validated_res = analytics_res.copy()
                 validated_res["verified"] = True
                 validated_res["data_completeness"] = 100.0
+                validated_res["data"] = pd.DataFrame()
                 return True, "No records found matching filters.", validated_res
+
+        has_all_missing = False
+        if not df.empty and len(df.columns) > 0:
+            numeric_mask = df.select_dtypes(include=[np.number]).columns
+            if len(numeric_mask) > 0:
+                has_all_missing = df[numeric_mask].isna().all().all()
+            else:
+                has_all_missing = df.isna().all().all()
+
+        if has_all_missing:
+            validated_res = analytics_res.copy()
+            validated_res["verified"] = True
+            validated_res["data_completeness"] = 100.0
+            validated_res["data"] = pd.DataFrame()
+            return True, "No records found matching filters.", validated_res
                 
         validated_res = analytics_res.copy()
         validated_warnings = list(analytics_res.get("warnings", []))

@@ -289,7 +289,7 @@ class RuleBasedParser:
                 candidates.append((op, inv_metric, 55))
 
         if self._matches_any(q, INVENTORY_STATUS_PHRASES):
-            candidates.append(("inventory_status", "stockout_risk", 50))
+            candidates.append(("inventory_status", "stockout_risk", 58))
 
         if re.search(r"\baverage selling price\b", q) or re.search(r"\basp\b", q) or (
             "average" in q and "price" in q
@@ -496,16 +496,28 @@ class RuleBasedParser:
             for kw in keywords:
                 if not re.search(r'\b' + re.escape(kw) + r'\b', q):
                     continue
-                if f"by {kw}" in q or f"each {kw}" in q:
-                    dims.append(dim)
-                    break
-                if f"across {kw}" in q or f"compare {kw}" in q or f"rank {kw}" in q:
+                if self._is_dimension_reference(q, kw):
                     dims.append(dim)
                     break
                 if rank_context and re.search(r'\b' + re.escape(kw) + r'\b', q):
                     dims.append(dim)
                     break
         return dims
+
+    def _is_dimension_reference(self, q: str, kw: str) -> bool:
+        if re.search(rf"\bby\b.*\b{re.escape(kw)}\b", q):
+            return True
+        if re.search(rf"\bfor\b.*\b{re.escape(kw)}\b", q):
+            return True
+        if re.search(rf"\bacross\b.*\b{re.escape(kw)}\b", q):
+            return True
+        if re.search(rf"\bcompare\b.*\b{re.escape(kw)}\b", q):
+            return True
+        if re.search(rf"\brank\b.*\b{re.escape(kw)}\b", q):
+            return True
+        if re.search(rf"\bgroup(?:ed)? by\b.*\b{re.escape(kw)}\b", q):
+            return True
+        return False
 
     def _resolve_operation_type(self, q: str) -> str:
         """Legacy helper; prefer _resolve_semantic."""
